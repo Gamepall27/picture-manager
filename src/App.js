@@ -59,62 +59,6 @@ function MediaPreview({ item }) {
   return h('img', { ...commonProps, alt: item.name, loading: 'lazy' }, null);
 }
 
-function MediaCard({ item, onKeep, onRemove }) {
-  return h(
-    'article',
-    { className: 'media-card' },
-    h(
-      'div',
-      { className: 'media-thumb' },
-      h(MediaPreview, { item }),
-      h(
-        'div',
-        { className: 'chip-row' },
-        h(Pill, {
-          label: item.status === STATUS_REMOVE ? 'Zum Löschen vorgemerkt' : 'Behalten',
-          tone: item.status === STATUS_REMOVE ? 'danger' : 'success',
-        }),
-        h('span', { className: 'meta-type' }, item.type || 'Unbekannt')
-      )
-    ),
-    h(
-      'div',
-      { className: 'media-meta' },
-      h('div', { className: 'media-name' }, item.name),
-      h('div', { className: 'media-path' }, item.relativePath),
-      h(
-        'div',
-        { className: 'meta-row' },
-        h('span', { className: 'meta-size' }, formatBytes(item.size)),
-        h('span', { className: 'meta-separator' }, '•'),
-        h('span', { className: 'meta-id' }, item.id.slice(0, 8))
-      )
-    ),
-    h(
-      'div',
-      { className: 'media-actions' },
-      h(
-        'button',
-        {
-          className: `action-btn ghost${item.status === STATUS_KEEP ? ' is-active' : ''}`,
-          onClick: onKeep,
-          type: 'button',
-        },
-        'Behalten'
-      ),
-      h(
-        'button',
-        {
-          className: `action-btn danger${item.status === STATUS_REMOVE ? ' is-active' : ''}`,
-          onClick: onRemove,
-          type: 'button',
-        },
-        'Zum Löschen vormerken'
-      )
-    )
-  );
-}
-
 function EmptyState({ title, description }) {
   return h(
     'div',
@@ -125,15 +69,23 @@ function EmptyState({ title, description }) {
   );
 }
 
-function QueueItem({ item, onRestore }) {
+function QueueItem({ item, onRestore, onToggleExpand, expanded }) {
   return h(
     'li',
-    { className: 'queue-item' },
-    h('div', { className: 'queue-main' }, item.relativePath),
+    {
+      className: `queue-item${expanded ? ' is-expanded' : ''}`,
+      onClick: onToggleExpand,
+    },
+    h(
+      'div',
+      { className: 'queue-thumb' },
+      h(MediaPreview, { item })
+    ),
     h(
       'div',
       { className: 'queue-meta' },
-      h('span', null, formatBytes(item.size)),
+      h('div', { className: 'queue-path' }, item.relativePath),
+      h('span', { className: 'queue-size' }, formatBytes(item.size)),
       h(
         'button',
         {
@@ -151,12 +103,19 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState('all');
   const [folderName, setFolderName] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [expandedQueueId, setExpandedQueueId] = useState(null);
 
   useEffect(() => {
     return () => {
       items.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     };
   }, [items]);
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    setExpandedQueueId(null);
+  }, [items.length]);
 
   const handleSelection = (event) => {
     const list = event?.target?.files;
@@ -198,10 +157,29 @@ export default function App() {
     event.target.value = '';
   };
 
-  const changeStatus = (id, status) => {
+  const goToIndex = (nextIndex) => {
+    setCurrentIndex((prev) => {
+      const safeIndex = Math.max(0, Math.min(nextIndex, Math.max(items.length - 1, 0)));
+      return items.length === 0 ? 0 : safeIndex;
+    });
+    setExpandedQueueId(null);
+  };
+
+  const goNext = () => {
+    goToIndex(Math.min(items.length - 1, currentIndex + 1));
+  };
+
+  const goPrev = () => {
+    goToIndex(Math.max(0, currentIndex - 1));
+  };
+
+  const changeStatus = (id, status, advance = false) => {
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, status } : item))
     );
+    if (advance && items.length > 1) {
+      goNext();
+    }
   };
 
   const bulkMark = (status) => {
@@ -215,6 +193,8 @@ export default function App() {
     });
     setFilter('all');
     setFolderName('');
+    setCurrentIndex(0);
+    setExpandedQueueId(null);
   };
 
   const filteredItems =
@@ -224,6 +204,7 @@ export default function App() {
         ? items.filter((item) => item.status === STATUS_KEEP)
         : items;
 
+  const currentItem = items[currentIndex];
   const removeQueue = items.filter((item) => item.status === STATUS_REMOVE);
   const keepCount = items.filter((item) => item.status === STATUS_KEEP).length;
 
@@ -353,14 +334,76 @@ export default function App() {
             })
           : h(
               'div',
-              { className: 'media-grid' },
-              filteredItems.map((item) =>
-                h(MediaCard, {
-                  key: item.id,
-                  item,
-                  onKeep: () => changeStatus(item.id, STATUS_KEEP),
-                  onRemove: () => changeStatus(item.id, STATUS_REMOVE),
-                })
+              { className: 'viewer' },
+              h(
+                'div',
+                { className: 'viewer__top' },
+                h('div', { className: 'viewer__eyebrow' }, `${currentIndex + 1} / ${items.length}`),
+                h('h3', { className: 'viewer__title' }, currentItem?.name || '—'),
+                h('p', { className: 'viewer__path' }, currentItem?.relativePath || ''),
+                currentItem
+                  ? h(
+                      'div',
+                      { className: 'viewer__meta' },
+                      h(Pill, {
+                        label: currentItem.status === STATUS_REMOVE ? 'Zum Löschen vorgemerkt' : 'Behalten',
+                        tone: currentItem.status === STATUS_REMOVE ? 'danger' : 'success',
+                      }),
+                      h('span', { className: 'viewer__size' }, formatBytes(currentItem.size)),
+                      h('span', { className: 'viewer__type' }, currentItem.type || 'Unbekannt')
+                    )
+                  : null
+              ),
+              currentItem
+                ? h(
+                    'div',
+                    { className: 'viewer__canvas' },
+                    h(MediaPreview, { item: currentItem })
+                  )
+                : null,
+              h(
+                'div',
+                { className: 'viewer__actions' },
+                h(
+                  'div',
+                  { className: 'viewer__nav' },
+                  h(
+                    'button',
+                    { className: 'nav-btn', onClick: goPrev, disabled: currentIndex === 0 },
+                    '⟵ Zurück'
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'nav-btn',
+                      onClick: goNext,
+                      disabled: currentIndex >= items.length - 1,
+                    },
+                    'Weiter ⟶'
+                  )
+                ),
+                h(
+                  'div',
+                  { className: 'viewer__decisions' },
+                  h(
+                    'button',
+                    {
+                      className: `action-btn ghost${currentItem?.status === STATUS_KEEP ? ' is-active' : ''}`,
+                      onClick: () => changeStatus(currentItem.id, STATUS_KEEP, true),
+                      type: 'button',
+                    },
+                    'Behalten'
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: `action-btn danger${currentItem?.status === STATUS_REMOVE ? ' is-active' : ''}`,
+                      onClick: () => changeStatus(currentItem.id, STATUS_REMOVE, true),
+                      type: 'button',
+                    },
+                    'Zum Löschen vormerken'
+                  )
+                )
               )
             )
       ),
@@ -389,7 +432,13 @@ export default function App() {
                 h(QueueItem, {
                   key: item.id,
                   item,
-                  onRestore: () => changeStatus(item.id, STATUS_KEEP),
+                  expanded: expandedQueueId === item.id,
+                  onToggleExpand: () =>
+                    setExpandedQueueId((prev) => (prev === item.id ? null : item.id)),
+                  onRestore: (event) => {
+                    event.stopPropagation();
+                    changeStatus(item.id, STATUS_KEEP);
+                  },
                 })
               )
             )
